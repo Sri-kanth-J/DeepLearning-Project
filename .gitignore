@@ -139,8 +139,9 @@ checkpoints/
 *.data-*
 *.meta
 
-# Large image datasets
-MLDemoProj/IMG_CLASSES/
+# Large image datasets and project directories
+MLDemoProj/
+comments/
 
 # Temporary files
 *.tmp
