@@ -1,464 +1,209 @@
+"""
+Optimized ResNet50 Training Script for Medical Image Classification
+"""
 import os
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 from pathlib import Path
-
 import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers, models
+from tensorflow.keras import layers, Model, Input, regularizers
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-
-import cv2
-from PIL import Image
-
 from sklearn.utils.class_weight import compute_class_weight
-import warnings
-warnings.filterwarnings('ignore')
 
-np.random.seed(42)
-tf.random.set_seed(42)
+class ResNetSkinClassifier:
+    def __init__(self, data_dir="balanced_dataset", input_shape=(224, 224, 3)):
+        self.data_dir = Path(data_dir)
+        self.input_shape = input_shape
+        self.batch_size = 32  # Larger batch size for 3000 samples per class
+        self.initial_epochs = 30  # More epochs for larger dataset
+        self.finetune_epochs = 20
+        
+    def load_data(self):
+        print("Loading dataset and applying augmentations...")
+        
+        if not self.data_dir.exists():
+            raise FileNotFoundError(f"Balanced dataset directory '{self.data_dir}' not found. Run simple_rebalance.py first to create the balanced dataset.")
 
-print("✓ All libraries imported successfully!")
+        # Since dataset already has extensive augmentation, use lighter training augmentation
+        train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
+            rescale=1./255,
+            rotation_range=15,  # Reduced since dataset is already augmented
+            width_shift_range=0.1,
+            height_shift_range=0.1,
+            horizontal_flip=True,
+            zoom_range=0.1,
+            fill_mode='nearest'
+        )
+        
+        # Validation generator (add rescaling)
+        val_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255)
+        
+        train_gen = train_datagen.flow_from_directory(
+            self.data_dir / "train",
+            target_size=self.input_shape[:2],
+            batch_size=self.batch_size,
+            class_mode='categorical',
+            shuffle=True,
+            seed=42
+        )
+        
+        val_gen = val_datagen.flow_from_directory(
+            self.data_dir / "val",
+            target_size=self.input_shape[:2],
+            batch_size=self.batch_size,
+            class_mode='categorical',
+            shuffle=False
+        )
+        
+        print(f"Classes found: {train_gen.num_classes}")
+        print(f"Training samples: {train_gen.samples}")
+        print(f"Validation samples: {val_gen.samples}")
+        print(f"Samples per class (approx): {train_gen.samples // train_gen.num_classes}")
+        return train_gen, val_gen
 
-BASE_DIR = Path('MLDemoProj/IMG_CLASSES')
+    def build_model(self, num_classes):
+        print("Building ResNet50 model...")
+        
+        base_model = ResNet50(
+            input_shape=self.input_shape,
+            include_top=False,
+            weights='imagenet'
+        )
+        base_model.trainable = False
 
-IMG_HEIGHT = 224
-IMG_WIDTH = 224
-IMG_CHANNELS = 3
-BATCH_SIZE = 20
-EPOCHS = 50  # Increased for better training
-VALIDATION_SPLIT = 0.2
+        inputs = Input(shape=self.input_shape)
+        
+        # Since we're using rescale=1./255 in data generator, don't use preprocess_input
+        x = base_model(inputs, training=False)
+        
+        # Enhanced architecture for larger balanced dataset
+        x = layers.GlobalAveragePooling2D()(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(0.3)(x)
+        
+        # Larger dense layers for more complex patterns
+        x = layers.Dense(1024, activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(0.4)(x)
+        
+        x = layers.Dense(512, activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(0.3)(x)
+        
+        outputs = layers.Dense(num_classes, activation='softmax')(x)
+        
+        model = Model(inputs, outputs)
+        return model, base_model
 
-DISEASE_CLASSES = [
-    "1. Eczema",
-    "2. Melanoma", 
-    "3. Atopic Dermatitis",
-    "4. Basal Cell Carcinoma",
-    "5. Melanocytic Nevi",
-    "6. Benign Keratosis-like Lesions",
-    "7. Psoriasis/Lichen Planus",
-    "8. Seborrheic Keratoses",
-    "9. Tinea/Ringworm/Candidiasis",
-    "10. Warts/Molluscum"
-]
+    def train(self):
+        train_gen, val_gen = self.load_data()
+        num_classes = train_gen.num_classes
+        model, base_model = self.build_model(num_classes)
 
-NUM_CLASSES = len(DISEASE_CLASSES)
+        # For balanced dataset with 3000 samples per class, analyze balance and use minimal weights
+        class_counts = {}
+        for i in range(train_gen.num_classes):
+            class_counts[i] = np.sum(train_gen.classes == i)
+        
+        print(f"\n📊 Class distribution:")
+        for class_id, count in class_counts.items():
+            print(f"   Class {class_id}: {count} samples")
+        
+        # Calculate balance ratio
+        max_count = max(class_counts.values())
+        min_count = min(class_counts.values())
+        balance_ratio = max_count / min_count if min_count > 0 else 1
+        
+        print(f"\n⚖️ Balance ratio: {balance_ratio:.2f}:1")
+        
+        if balance_ratio < 1.5:
+            print("✅ Excellent balance - skipping class weights for faster training")
+            class_weight_dict = None  # No class weights needed for perfectly balanced data
+        else:
+            print("🟡 Some imbalance detected - using light class weights")
+            class_weights = compute_class_weight(
+                'balanced',
+                classes=np.unique(train_gen.classes),
+                y=train_gen.classes
+            )
+            # Cap weights for balanced dataset
+            class_weights = np.clip(class_weights, 0.5, 2.0)
+            class_weight_dict = dict(enumerate(class_weights))
+            print(f"   Applied weights: {class_weight_dict}")
 
-print(f"✓ IMPROVED CONFIGURATION:")
-print(f"  - Epochs: {EPOCHS} (increased from 25)")
-print(f"  - Progressive training: Frozen → Fine-tuned")
-print(f"  - Better early stopping: Patience=10")
-print(f"  - Learning rate scheduling enabled")
-print(f"  - Enhanced data augmentation")
+        # --- Phase 1: Train Top Layers ---
+        print("\nPhase 1: Transfer Learning...")
+        model.compile(
+            optimizer=Adam(learning_rate=1e-3),
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
 
+        # Optimized callbacks for balanced dataset - Phase 1 (Transfer Learning)
+        callbacks_phase1 = [
+            ReduceLROnPlateau(monitor='val_accuracy', factor=0.3, patience=6, min_lr=1e-6, verbose=1),  # More patience for 3000-sample classes
+            EarlyStopping(monitor='val_accuracy', patience=12, restore_best_weights=True, verbose=1),  # Increased patience for balanced data
+            ModelCheckpoint('models/checkpoints/balanced_resnet50_transfer.keras', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1)
+        ]
 
-def create_enhanced_data_generators(base_path):
-    """Enhanced data generators with stronger augmentation."""
-    
-    print("\n" + "="*70)
-    print("STEP 1: ENHANCED DATA GENERATORS")
-    print("="*70)
-    
-    # Stronger data augmentation for better generalization
-    train_datagen = ImageDataGenerator(
-        rescale=1./255.0,
-        rotation_range=25,         # Increased rotation
-        width_shift_range=0.15,    # More translation
-        height_shift_range=0.15,
-        shear_range=0.1,           # Added shear
-        zoom_range=0.1,            # Added zoom
-        horizontal_flip=True,
-        vertical_flip=False,       # Medical images shouldn't be flipped vertically
-        brightness_range=[0.8, 1.2], # Brightness variation
-        fill_mode='nearest',
-        validation_split=VALIDATION_SPLIT
-    )
-    
-    val_datagen = ImageDataGenerator(
-        rescale=1./255.0,
-        validation_split=VALIDATION_SPLIT
-    )
-    
-    train_generator = train_datagen.flow_from_directory(
-        base_path,
-        target_size=(IMG_HEIGHT, IMG_WIDTH),
-        batch_size=BATCH_SIZE,
-        class_mode='categorical',
-        subset='training',
-        shuffle=True,
-        seed=42
-    )
-    
-    validation_generator = val_datagen.flow_from_directory(
-        base_path,
-        target_size=(IMG_HEIGHT, IMG_WIDTH),
-        batch_size=BATCH_SIZE,
-        class_mode='categorical',
-        subset='validation',
-        shuffle=False,
-        seed=42
-    )
-    
-    class_names = list(train_generator.class_indices.keys())
-    class_names.sort()
-    
-    print(f"✓ Enhanced data augmentation enabled!")
-    print(f"  - Rotation: ±25° (vs ±15°)")
-    print(f"  - Translation: ±15% (vs ±10%)")  
-    print(f"  - Added: shear, zoom, brightness variation")
-    print(f"  - Training samples: {train_generator.samples}")
-    print(f"  - Validation samples: {validation_generator.samples}")
-    
-    return train_generator, validation_generator, class_names
+        # Create directories for balanced dataset training
+        os.makedirs('models/checkpoints', exist_ok=True)
+        os.makedirs('models', exist_ok=True)
+        
+        history1 = model.fit(
+            train_gen,
+            epochs=self.initial_epochs,
+            validation_data=val_gen,
+            callbacks=callbacks_phase1,
+            class_weight=class_weight_dict,
+            verbose=1
+        )
 
+        # --- Phase 2: Fine-Tuning ---
+        print("\nPhase 2: Fine-tuning top convolutional blocks...")
+        base_model.trainable = True
+        
+        # Freeze all layers except the last 30
+        for layer in base_model.layers[:-30]:
+            layer.trainable = False
 
-def compute_class_weights_from_generators(train_generator, validation_generator, num_classes):
-    """Compute class weights for imbalanced dataset."""
-    
-    print("\n" + "="*70)
-    print("STEP 2: CLASS WEIGHT COMPUTATION")
-    print("="*70)
-    
-    all_labels = np.concatenate([train_generator.classes, validation_generator.classes])
-    
-    class_weights = compute_class_weight(
-        'balanced',
-        classes=np.arange(num_classes),
-        y=all_labels
-    )
-    
-    class_weights_dict = {i: weight for i, weight in enumerate(class_weights)}
-    
-    print("\nClass Distribution and Weights:")
-    for class_idx in range(num_classes):
-        count = np.sum(all_labels == class_idx)
-        weight = class_weights_dict[class_idx]
-        percentage = (count / len(all_labels)) * 100
-        print(f"  Class {class_idx}: {count:5d} images ({percentage:5.1f}%) | Weight: {weight:.3f}")
-    
-    return class_weights_dict, class_weights
+        model.compile(
+            optimizer=Adam(learning_rate=5e-5), # Lower LR for fine-tuning
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
 
+        # Optimized callbacks for balanced dataset - Phase 2 (Fine-tuning)
+        callbacks_phase2 = [
+            ReduceLROnPlateau(monitor='val_accuracy', factor=0.5, patience=5, min_lr=1e-7, verbose=1),  # Conservative reduction for fine-tuning
+            EarlyStopping(monitor='val_accuracy', patience=8, restore_best_weights=True, verbose=1),  # Sufficient patience for convergence
+            ModelCheckpoint('models/checkpoints/balanced_resnet50_finetuned.keras', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1)
+        ]
 
-def create_improved_mobilenet_model(num_classes=10):
-    """Create improved MobileNet model with better activations."""
-    
-    print("\n" + "="*70)
-    print("STEP 3: IMPROVED MOBILENET MODEL")
-    print("="*70)
-    
-    input_tensor = layers.Input(shape=(IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS))
-    
-    # MobileNetV2 backbone
-    base_model = tf.keras.applications.MobileNetV2(
-        input_shape=(IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS),
-        include_top=False,
-        weights='imagenet'
-    )
-    
-    # Start with frozen backbone (will unfreeze later)
-    base_model.trainable = False
-    
-    print("✓ MobileNetV2 backbone loaded")
-    print(f"  - Initial state: FROZEN (feature extraction)")
-    print(f"  - Will be unfrozen after initial training")
-    
-    x = base_model(input_tensor)
-    x = layers.GlobalAveragePooling2D()(x)
-    
-    # Improved classification head with Swish activation
-    x = layers.Dense(
-        256,  # Increased from 128
-        activation='swish',  # Better than ReLU for deep networks
-        kernel_regularizer=keras.regularizers.l2(1e-4),
-        name='dense_1'
-    )(x)
-    print("✓ Dense layer 1: 256 neurons with Swish activation")
-    
-    x = layers.BatchNormalization(name='bn_1')(x)
-    print("✓ Batch normalization added")
-    
-    x = layers.Dropout(0.3, name='dropout_1')(x)  # Reduced dropout
-    
-    # Second dense layer for better representation
-    x = layers.Dense(
-        128,
-        activation='swish',
-        kernel_regularizer=keras.regularizers.l2(1e-4),
-        name='dense_2'
-    )(x)
-    print("✓ Dense layer 2: 128 neurons with Swish activation")
-    
-    x = layers.BatchNormalization(name='bn_2')(x)
-    x = layers.Dropout(0.2, name='dropout_2')(x)
-    
-    # Output layer
-    output = layers.Dense(
-        num_classes,
-        activation='softmax',
-        name='predictions'
-    )(x)
-    print(f"✓ Output layer: {num_classes} classes with Softmax")
-    
-    model = models.Model(inputs=input_tensor, outputs=output)
-    
-    print("\n" + "="*70)
-    print("IMPROVED MODEL SUMMARY")
-    print("="*70)
-    model.summary()
-    
-    print(f"\n✅ Model improvements:")
-    print(f"  - Deeper classification head (256 → 128 → {num_classes})")
-    print(f"  - Swish activation (better than ReLU)")
-    print(f"  - Batch normalization for stable training")
-    print(f"  - Progressive training strategy")
-    
-    return model, base_model
-
-
-def compile_model_progressive(model, phase="initial"):
-    """Compile model with different settings for different training phases."""
-    
-    print(f"\n✓ Compiling model for {phase} phase")
-    
-    if phase == "initial":
-        # Higher learning rate for initial training
-        optimizer = Adam(learning_rate=0.001)
-        print("  - Learning rate: 0.001 (initial training)")
-    else:
-        # Lower learning rate for fine-tuning
-        optimizer = Adam(learning_rate=0.0001)
-        print("  - Learning rate: 0.0001 (fine-tuning)")
-    
-    model.compile(
-        optimizer=optimizer,
-        loss='categorical_crossentropy',
-        metrics=['accuracy']  # Using standard accuracy metric for compatibility
-    )
-
-
-def create_callbacks():
-    """Create improved callbacks for training."""
-    
-    print("\n" + "="*70)
-    print("STEP 4: SETTING UP TRAINING CALLBACKS")
-    print("="*70)
-    
-    # Less aggressive early stopping
-    early_stop = EarlyStopping(
-        monitor='val_accuracy',  # Monitor accuracy instead of loss
-        patience=10,             # Increased from 3
-        restore_best_weights=True,
-        verbose=1,
-        mode='max'
-    )
-    
-    # Learning rate reduction
-    reduce_lr = ReduceLROnPlateau(
-        monitor='val_loss',
-        factor=0.2,
-        patience=5,
-        min_lr=1e-7,
-        verbose=1
-    )
-    
-    # Model checkpointing
-    checkpoint = ModelCheckpoint(
-        'models/best_model.h5',
-        monitor='val_accuracy',
-        save_best_only=True,
-        verbose=1,
-        mode='max'
-    )
-    
-    print("✓ Callbacks configured:")
-    print("  - Early Stopping: patience=10 (vs 3), monitor=val_accuracy")
-    print("  - Learning Rate Reduction: factor=0.2, patience=5")
-    print("  - Model Checkpoint: saves best model automatically")
-    
-    return [early_stop, reduce_lr, checkpoint]
-
-
-def train_progressive(model, base_model, train_generator, validation_generator, class_weights_dict):
-    """Progressive training: frozen backbone → fine-tuning."""
-    
-    print("\n" + "="*70)
-    print("STEP 5: PROGRESSIVE TRAINING STRATEGY")
-    print("="*70)
-    
-    steps_per_epoch = train_generator.samples // BATCH_SIZE
-    validation_steps = validation_generator.samples // BATCH_SIZE
-    callbacks = create_callbacks()
-    
-    # Phase 1: Train with frozen backbone
-    print("\n🔥 PHASE 1: TRAINING WITH FROZEN BACKBONE")
-    print("-" * 50)
-    
-    compile_model_progressive(model, "initial")
-    
-    history_1 = model.fit(
-        train_generator,
-        steps_per_epoch=steps_per_epoch,
-        epochs=20,  # Initial training
-        validation_data=validation_generator,
-        validation_steps=validation_steps,
-        class_weight=class_weights_dict,
-        callbacks=callbacks,
-        verbose=1
-    )
-    
-    print("\n✅ Phase 1 completed!")
-    
-    # Phase 2: Unfreeze and fine-tune
-    print("\n🔥 PHASE 2: FINE-TUNING WITH UNFROZEN BACKBONE")
-    print("-" * 50)
-    
-    # Unfreeze the base model
-    base_model.trainable = True
-    
-    # Fine-tune from the top layers only
-    for layer in base_model.layers[:100]:
-        layer.trainable = False
-    
-    print(f"✓ Unfrozen backbone: {sum(1 for layer in base_model.layers if layer.trainable)} trainable layers")
-    
-    # Recompile with lower learning rate
-    compile_model_progressive(model, "fine_tuning")
-    
-    # Continue training
-    history_2 = model.fit(
-        train_generator,
-        steps_per_epoch=steps_per_epoch,
-        epochs=30,  # Additional fine-tuning
-        validation_data=validation_generator,
-        validation_steps=validation_steps,
-        class_weight=class_weights_dict,
-        callbacks=callbacks,
-        verbose=1
-    )
-    
-    print("\n✅ Phase 2 completed!")
-    
-    # Combine histories
-    history = {
-        'loss': history_1.history['loss'] + history_2.history['loss'],
-        'accuracy': history_1.history['accuracy'] + history_2.history['accuracy'],
-        'val_loss': history_1.history['val_loss'] + history_2.history['val_loss'],
-        'val_accuracy': history_1.history['val_accuracy'] + history_2.history['val_accuracy']
-    }
-    
-    return history
-
-
-def plot_enhanced_training_history(history):
-    """Plot comprehensive training history."""
-    
-    print("\n" + "="*70)
-    print("PLOTTING TRAINING RESULTS")
-    print("="*70)
-    
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    
-    # Accuracy
-    axes[0,0].plot(history['accuracy'], 'b-', label='Training Accuracy')
-    axes[0,0].plot(history['val_accuracy'], 'r-', label='Validation Accuracy')
-    axes[0,0].set_title('Model Accuracy')
-    axes[0,0].set_xlabel('Epoch')
-    axes[0,0].set_ylabel('Accuracy')
-    axes[0,0].legend()
-    axes[0,0].grid(True)
-    
-    # Loss
-    axes[0,1].plot(history['loss'], 'b-', label='Training Loss')
-    axes[0,1].plot(history['val_loss'], 'r-', label='Validation Loss')
-    axes[0,1].set_title('Model Loss')
-    axes[0,1].set_xlabel('Epoch')
-    axes[0,1].set_ylabel('Loss')
-    axes[0,1].legend()
-    axes[0,1].grid(True)
-    
-    # Learning curves
-    axes[1,0].plot(history['accuracy'], 'b-', alpha=0.7)
-    axes[1,0].plot(history['val_accuracy'], 'r-', alpha=0.7)
-    axes[1,0].axvline(x=20, color='g', linestyle='--', label='Fine-tuning starts')
-    axes[1,0].set_title('Training Phases')
-    axes[1,0].set_xlabel('Epoch')
-    axes[1,0].set_ylabel('Accuracy')
-    axes[1,0].legend()
-    axes[1,0].grid(True)
-    
-    # Final metrics
-    final_train_acc = history['accuracy'][-1]
-    final_val_acc = history['val_accuracy'][-1]
-    best_val_acc = max(history['val_accuracy'])
-    
-    axes[1,1].bar(['Training', 'Validation', 'Best Validation'], 
-                  [final_train_acc, final_val_acc, best_val_acc],
-                  color=['blue', 'red', 'green'])
-    axes[1,1].set_title('Final Performance')
-    axes[1,1].set_ylabel('Accuracy')
-    axes[1,1].set_ylim(0, 1)
-    
-    for i, v in enumerate([final_train_acc, final_val_acc, best_val_acc]):
-        axes[1,1].text(i, v + 0.01, f'{v:.3f}', ha='center', va='bottom')
-    
-    plt.tight_layout()
-    plt.savefig('training_history_improved.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    print(f"✅ Training completed with improved strategy!")
-    print(f"  - Final training accuracy: {final_train_acc:.3f}")
-    print(f"  - Final validation accuracy: {final_val_acc:.3f}")
-    print(f"  - Best validation accuracy: {best_val_acc:.3f}")
-
+        history2 = model.fit(
+            train_gen,
+            epochs=self.finetune_epochs,
+            validation_data=val_gen,
+            callbacks=callbacks_phase2,
+            class_weight=class_weight_dict,
+            verbose=1
+        )
+        
+        print("\nTraining completed. Best model saved to 'models/balanced_resnet50_finetuned.keras'")
+        print("\n📊 Training used balanced dataset - should see much better performance!")
+        return model
 
 if __name__ == "__main__":
-    print("=" * 70)
-    print("🚀 IMPROVED SKIN DISEASE CLASSIFICATION TRAINING")
-    print("=" * 70)
-    print("Improvements:")
-    print("✓ Progressive training (frozen → fine-tuned)")
-    print("✓ Better early stopping (patience=10)")
-    print("✓ Swish activation functions")
-    print("✓ Enhanced data augmentation")
-    print("✓ Learning rate scheduling")
-    print("✓ Deeper classification head")
-    print("=" * 70)
+    # Check if balanced dataset exists
+    from pathlib import Path
+    if not Path("balanced_dataset").exists():
+        print("❌ Balanced dataset not found!")
+        print("📋 Please run simple_rebalance.py first to create balanced dataset")
+        print("   python simple_rebalance.py")
+        exit(1)
     
-    # Main training pipeline
-    train_generator, validation_generator, class_names = create_enhanced_data_generators(BASE_DIR)
-    
-    class_weights_dict, _ = compute_class_weights_from_generators(
-        train_generator, validation_generator, NUM_CLASSES
-    )
-    
-    model, base_model = create_improved_mobilenet_model(num_classes=NUM_CLASSES)
-    
-    history = train_progressive(
-        model, base_model, train_generator, validation_generator, class_weights_dict
-    )
-    
-    # Save final model
-    os.makedirs('models', exist_ok=True)
-    model.save('models/skin_disease_improved_model.h5')
-    
-    plot_enhanced_training_history(history)
-    
-    print("\n" + "="*70)
-    print("🎉 IMPROVED TRAINING COMPLETED!")
-    print("="*70)
-    print("Key improvements implemented:")
-    print("✓ 50 total epochs (20 frozen + 30 fine-tuned)")
-    print("✓ Progressive training strategy")
-    print("✓ Better activation functions (Swish)")
-    print("✓ Enhanced data augmentation")
-    print("✓ Smarter early stopping")
-    print("✓ Learning rate scheduling")
-    print("\nExpected improvements:")
-    print("📈 Higher accuracy (target: 75-85%)")
-    print("🎯 Better generalization")
-    print("⚡ More stable training")
-    print("="*70)
+    print("🚀 Training with balanced dataset...")
+    classifier = ResNetSkinClassifier()
+    classifier.train()

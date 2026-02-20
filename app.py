@@ -15,7 +15,7 @@ import io
 
 # Page configuration
 st.set_page_config(
-    page_title="Improved Skin Disease Classifier",
+    page_title="Advanced Skin Lesion Classifier",
     page_icon="🩺",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -82,87 +82,126 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Disease information
+# Disease information for 14 skin lesion classes
 DISEASE_INFO = {
-    "Melanoma": {
-        "description": "A serious form of skin cancer that develops in melanocytes (pigment-producing cells).",
-        "symptoms": "Asymmetric moles, irregular borders, color changes, diameter >6mm",
-        "urgency": "HIGH - Requires immediate medical attention",
-        "color": "#E74C3C"
+    "Actinic_keratoses": {
+        "description": "Rough, scaly patches on sun-exposed skin that may become cancerous.",
+        "symptoms": "Rough, scaly patches, reddish, pink, or brown spots",
+        "urgency": "MEDIUM - Should be monitored and treated by dermatologist",
+        "color": "#F39C12"
     },
-    "Basal Cell Carcinoma": {
+    "Basal_cell_carcinoma": {
         "description": "The most common type of skin cancer, typically appears as a small, shiny bump.",
         "symptoms": "Pearl-like bumps, open sores, red patches, pink growths",
         "urgency": "MEDIUM - Should be examined by a dermatologist",
-        "color": "#F39C12"
+        "color": "#E74C3C"
     },
-    "Atopic Dermatitis": {
-        "description": "A chronic inflammatory skin condition (eczema) causing itchy, red patches.",
-        "symptoms": "Red, inflamed skin, intense itching, dry patches",
-        "urgency": "LOW - Manageable with proper treatment",
-        "color": "#3498DB"
-    },
-    "Eczema": {
-        "description": "Inflammatory skin condition causing itchy, red, swollen patches.",
-        "symptoms": "Red, itchy patches, dry skin, inflammation",
-        "urgency": "LOW - Manageable with proper care",
-        "color": "#9B59B6"
-    },
-    "Melanocytic Nevi": {
-        "description": "Common benign moles composed of melanocytes (pigment cells).",
-        "symptoms": "Brown or black spots, uniform color and shape",
-        "urgency": "LOW - Monitor for changes",
-        "color": "#27AE60"
-    },
-    "Benign Keratosis-like Lesions": {
+    "Benign_keratosis": {
         "description": "Non-cancerous skin growths that appear as scaly, rough patches.",
         "symptoms": "Rough, scaly patches, varying colors",
         "urgency": "LOW - Generally harmless",
         "color": "#16A085"
     },
-    "Psoriasis": {
-        "description": "Autoimmune condition causing rapid skin cell buildup and scaling.",
-        "symptoms": "Red patches with silvery scales, itching, burning",
-        "urgency": "MEDIUM - Requires ongoing management",
+    "Chickenpox": {
+        "description": "Viral infection causing itchy, blister-like rash all over the body.",
+        "symptoms": "Red, itchy spots that develop into fluid-filled blisters",
+        "urgency": "MEDIUM - Contagious, requires medical care",
         "color": "#E67E22"
     },
-    "Seborrheic Keratoses": {
-        "description": "Common benign skin growths that appear waxy and 'stuck-on'.",
-        "symptoms": "Waxy, scaly, stuck-on appearance",
-        "urgency": "LOW - Cosmetic concern only",
+    "Cowpox": {
+        "description": "Viral infection typically contracted from cattle, causes localized lesions.",
+        "symptoms": "Red, inflamed lesions that may ulcerate",
+        "urgency": "MEDIUM - Requires medical attention",
         "color": "#8E44AD"
     },
-    "Tinea/Ringworm": {
-        "description": "Fungal infection causing circular, red, scaly patches.",
-        "symptoms": "Circular red patches, scaling edges, central clearing",
-        "urgency": "MEDIUM - Treatable with antifungal medication",
-        "color": "#2980B9"
+    "Dermatofibroma": {
+        "description": "Common benign skin tumor that feels like a hard bump.",
+        "symptoms": "Firm, raised nodules, brown or reddish color",
+        "urgency": "LOW - Benign, cosmetic concern only",
+        "color": "#27AE60"
     },
-    "Warts/Molluscum": {
-        "description": "Viral infections causing small bumps or wart-like growths.",
-        "symptoms": "Small bumps, rough texture, may have central dimple",
-        "urgency": "LOW - Often resolve spontaneously",
-        "color": "#7F8C8D"
+    "Healthy": {
+        "description": "Normal, healthy skin with no signs of disease or infection.",
+        "symptoms": "Clear, normal-appearing skin",
+        "urgency": "NONE - No treatment needed",
+        "color": "#27AE60"
+    },
+    "HFMD": {
+        "description": "Hand, foot, and mouth disease - viral infection causing rash and fever.",
+        "symptoms": "Fever, sore throat, rash on hands, feet, and mouth",
+        "urgency": "MEDIUM - Contagious, requires medical care",
+        "color": "#3498DB"
+    },
+    "Measles": {
+        "description": "Highly contagious viral infection causing fever and characteristic rash.",
+        "symptoms": "High fever, cough, runny nose, red, blotchy rash",
+        "urgency": "HIGH - Highly contagious, requires immediate medical attention",
+        "color": "#E74C3C"
+    },
+    "Melanocytic_nevi": {
+        "description": "Common benign moles composed of melanocytes (pigment cells).",
+        "symptoms": "Brown or black spots, uniform color and shape",
+        "urgency": "LOW - Monitor for changes",
+        "color": "#9B59B6"
+    },
+    "Melanoma": {
+        "description": "A serious form of skin cancer that develops in melanocytes (pigment-producing cells).",
+        "symptoms": "Asymmetric moles, irregular borders, color changes, diameter >6mm",
+        "urgency": "HIGH - Requires immediate medical attention",
+        "color": "#C0392B"
+    },
+    "Monkeypox": {
+        "description": "Viral infection causing fever and distinctive pustular rash.",
+        "symptoms": "Fever, headache, pustular lesions, lymph node swelling",
+        "urgency": "HIGH - Contagious, requires immediate medical attention",
+        "color": "#8E44AD"
+    },
+    "Squamous_cell_carcinoma": {
+        "description": "Second most common type of skin cancer, appears as scaly red patches.",
+        "symptoms": "Scaly red patches, open sores, elevated growths with central depression",
+        "urgency": "HIGH - Requires immediate medical attention",
+        "color": "#E74C3C"
+    },
+    "Vascular_lesions": {
+        "description": "Abnormalities in blood vessels causing red or purple skin marks.",
+        "symptoms": "Red or purple marks, may be raised or flat",
+        "urgency": "LOW - Usually benign, consult dermatologist if changing",
+        "color": "#2980B9"
     }
 }
 
 DISEASE_CLASSES = [
-    "Eczema",
-    "Melanoma", 
-    "Atopic Dermatitis",
-    "Basal Cell Carcinoma",
-    "Melanocytic Nevi",
-    "Benign Keratosis-like Lesions",
-    "Psoriasis/Lichen Planus",
-    "Seborrheic Keratoses",
-    "Tinea/Ringworm/Candidiasis",
-    "Warts/Molluscum"
+    "Actinic_keratoses",
+    "Basal_cell_carcinoma", 
+    "Benign_keratosis",
+    "Chickenpox",
+    "Cowpox",
+    "Dermatofibroma",
+    "Healthy",
+    "HFMD",
+    "Measles",
+    "Melanocytic_nevi",
+    "Melanoma",
+    "Monkeypox",
+    "Squamous_cell_carcinoma",
+    "Vascular_lesions"
 ]
 
 @st.cache_resource
 def load_model():
     """Load the improved trained model with caching."""
     model_paths = [
+        'best_mobilenet_skin_classifier_finetuned.h5',
+        'mobilenet_skin_lesion_classifier_final.h5',
+        'best_mobilenet_skin_classifier.h5',
+        'efficientnet_skin_lesion_classifier.h5',
+        'mobilenet_skin_lesion_classifier.h5',
+        'best_efficientnet_model.h5',
+        'best_mobilenet_model.h5',
+        'models/efficientnet_finetuned_best.h5',
+        'models/mobilenet_finetuned_best.h5',
+        'models/efficientnet_best.h5',
+        'models/mobilenet_best.h5',
         'models/best_model.h5',
         'models/skin_disease_improved_model.h5',
         'models/skin_disease_mobilenet_model.h5'
@@ -171,13 +210,19 @@ def load_model():
     for model_path in model_paths:
         if os.path.exists(model_path):
             try:
-                model = keras.models.load_model(model_path)
+                model = keras.models.load_model(model_path, compile=False)
+                # Recompile for consistency
+                model.compile(
+                    optimizer=tf.keras.optimizers.Adam(0.0001),
+                    loss='categorical_crossentropy',
+                    metrics=['accuracy']
+                )
                 return model, model_path
             except Exception as e:
                 st.error(f"Error loading {model_path}: {e}")
                 continue
     
-    st.error("No trained model found! Please run train_improved.py first.")
+    st.error("No trained model found! Please run 'python train_improved.py' first.")
     return None, None
 
 def preprocess_image(image):
@@ -190,8 +235,8 @@ def preprocess_image(image):
         if len(img_array.shape) == 3 and img_array.shape[2] == 4:
             img_array = img_array[:,:,:3]  # Remove alpha channel
         
-        # Resize to model input size
-        img_resized = cv2.resize(img_array, (224, 224))
+        # Resize to model input size (384x384 for optimized MobileNet)
+        img_resized = cv2.resize(img_array, (384, 384))
         
         # Normalize pixel values
         img_normalized = img_resized.astype(np.float32) / 255.0
@@ -344,7 +389,7 @@ def main():
     """Main Streamlit application."""
     
     # Header
-    st.markdown('<div class="main-header">🩺 Improved Skin Disease Classifier</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">🩺 Advanced Skin Lesion Classifier</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">Advanced AI-Powered Medical Screening Tool</div>', unsafe_allow_html=True)
     
     # Load model
@@ -491,7 +536,7 @@ def main():
     else:
         # Landing page content
         st.markdown("""
-        ### 👋 Welcome to the Improved Skin Disease Classifier!
+        ### 👋 Welcome to the Advanced Skin Lesion Classifier!
         
         This advanced AI model uses progressive training and state-of-the-art techniques to analyze skin conditions.
         
