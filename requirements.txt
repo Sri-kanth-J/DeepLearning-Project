@@ -1,0 +1,43 @@
+# GPU-Optimized Requirements for Deep Learning Project
+# WSL2 Ubuntu 22.04 LTS + TensorFlow 2.20.0
+#
+# ============================================================
+# SETUP (WSL2 Ubuntu 22.04):
+# ============================================================
+#   1. python3 -m venv venv && source venv/bin/activate
+#   2. pip install tensorflow[and-cuda]      # installs TF + CUDA/cuDNN
+#   3. pip install -r requirements.txt       # installs everything else
+#
+# ============================================================
+# OPTION: Native Windows (no GPU support in tf>=2.11)
+# ============================================================
+#   pip install tensorflow==2.10.1          # last Windows-native GPU build
+
+# Core ML/DL - TF already installed via tensorflow[and-cuda]
+# tensorflow[and-cuda]  -- install separately first (see above)
+
+# numpy: TF 2.20 requires >=1.26; numpy 2.x is supported
+numpy>=1.26.0
+
+# Essential data processing
+matplotlib>=3.7.0
+Pillow>=9.4.0
+pandas>=1.5.0
+seaborn>=0.12.0
+
+# Computer vision (headless build for WSL2/server - no display needed)
+opencv-python-headless>=4.8.0
+
+# Machine learning utilities
+scikit-learn>=1.2.0
+
+# Web app & visualisation
+streamlit>=1.28.0
+plotly>=5.15.0
+
+# Hugging Face (dataset download)
+datasets>=2.14.0
+huggingface_hub>=0.16.0
+
+# Additional utilities
+tqdm>=4.64.0

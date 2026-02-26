@@ -1,0 +1,77 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+*.cover
+*.py,cover
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+
+# Machine Learning specific
+*.h5
+*.pkl
+*.pickle
+*.joblib
+checkpoints/
+*.weights
+*.index
+*.data-*
+*.meta
+
+# Large image datasets and project directories
+dataset/
+balanced_dataset/
+
+
+# Model and training artifacts
+*.keras
+*.ckpt
+*.pth
+*.pt
+logs/
+runs/
+tensorboard/
+wandb/
+
+# Temporary files
+*.tmp
+*.temp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

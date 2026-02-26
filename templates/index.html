@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Skin Disease Classifier</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <!-- Chart.js for confidence bar chart -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ================================================================ HEADER -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2a5 5 0 1 0 5 5 5 5 0 0 0-5-5z"/><path d="M3 21v-1a9 9 0 0 1 18 0v1"/>
+      </svg>
+    </div>
+    <div class="header-text">
+      <h1>Skin Disease Classifier</h1>
+      <p>AI-powered dermatology screening — EfficientNetV2S</p>
+    </div>
+    <div class="model-badge {% if not model_loaded %}badge-error{% endif %}">
+      {% if model_loaded %}
+        <span class="dot dot-green"></span> Model ready &nbsp;·&nbsp; {{ model_name }}
+        {% if model_size_mb %}&nbsp;·&nbsp; {{ model_size_mb }} MB{% endif %}
+        &nbsp;·&nbsp; {{ num_classes }} classes
+      {% else %}
+        <span class="dot dot-red"></span> Model not loaded — run <code>train.py</code> first
+      {% endif %}
+    </div>
+  </div>
+</header>
+
+<!-- ============================================================ MAIN LAYOUT -->
+<main class="main-grid">
+
+  <!-- ---------------------------------------------------------- LEFT PANEL -->
+  <section class="panel panel-left">
+    <h2 class="panel-title">Upload Image</h2>
+
+    <!-- Drop zone -->
+    <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Upload skin image">
+      <div class="dropzone-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </div>
+      <p class="dropzone-label">Drag &amp; drop or <span class="link-text">click to select</span></p>
+      <p class="dropzone-hint">JPG · PNG · BMP · WebP &nbsp;·&nbsp; max 16 MB</p>
+      <input type="file" id="fileInput" accept=".jpg,.jpeg,.png,.bmp,.webp" hidden />
+    </div>
+
+    <!-- Image preview -->
+    <div class="preview-box" id="previewBox" hidden>
+      <img id="previewImg" src="" alt="Preview" />
+      <div class="preview-meta" id="previewMeta"></div>
+      <button class="btn btn-outline btn-sm" id="clearBtn">Remove image</button>
+    </div>
+
+    <!-- Analyse button -->
+    <button class="btn btn-primary btn-full" id="analyseBtn" disabled>
+      <span id="btnLabel">Analyse Image</span>
+      <span id="btnSpinner" class="spinner" hidden></span>
+    </button>
+
+    <!-- Error banner -->
+    <div class="alert alert-error" id="errorBanner" hidden></div>
+
+    <!-- ------------------------------------------- Model info -->
+    <div class="info-box">
+      <h3>Model Details</h3>
+      <table class="info-table">
+        <tr><td>Architecture</td><td><strong>EfficientNetV2S</strong></td></tr>
+        <tr><td>Input size</td><td><strong>224 × 224</strong></td></tr>
+        <tr><td>Preprocessing</td><td><strong>Internal (no rescaling)</strong></td></tr>
+        <tr><td>Optimizer</td><td><strong>AdamW + Cosine warmup</strong></td></tr>
+        <tr><td>Fine-tuned layers</td><td><strong>Top 100</strong></td></tr>
+        <tr><td>Test accuracy</td><td><strong>81.6 %</strong></td></tr>
+        <tr><td>Macro F1</td><td><strong>0.827</strong></td></tr>
+      </table>
+    </div>
+
+    <div class="disclaimer">
+      <strong>Medical Disclaimer</strong><br>
+      This tool is for educational and research purposes only. It is not a substitute for professional medical advice, diagnosis, or treatment. Always consult a qualified dermatologist.
+    </div>
+  </section>
+
+  <!-- --------------------------------------------------------- RIGHT PANEL -->
+  <section class="panel panel-right" id="resultsPanel">
+
+    <!-- Empty state -->
+    <div class="empty-state" id="emptyState">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <p>Upload an image and click <strong>Analyse Image</strong> to see results.</p>
+    </div>
+
+    <!-- Results (hidden until prediction) -->
+    <div id="results" hidden>
+
+      <!-- Primary prediction card -->
+      <div class="pred-card" id="predCard">
+        <div class="pred-card-rank">Top Prediction</div>
+        <div class="pred-card-name" id="predName">—</div>
+        <div class="pred-card-confidence" id="predConfidence">—</div>
+        <div class="confidence-bar-wrap">
+          <div class="confidence-bar-fill" id="predBar" style="width:0%"></div>
+        </div>
+        <div class="pred-card-urgency" id="predUrgency"></div>
+      </div>
+
+      <!-- Top 3 -->
+      <h3 class="section-title">Top 3 Predictions</h3>
+      <div class="top3-grid" id="top3Grid"></div>
+
+      <!-- Disease description -->
+      <div class="desc-box" id="descBox" hidden>
+        <h3 class="section-title" id="descTitle">About the Condition</h3>
+        <p id="descText"></p>
+      </div>
+
+      <!-- Full probability chart -->
+      <h3 class="section-title">All Class Probabilities</h3>
+      <div class="chart-wrap">
+        <canvas id="predChart"></canvas>
+      </div>
+
+    </div><!-- /results -->
+
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  Skin Disease Classifier &nbsp;·&nbsp; EfficientNetV2S &nbsp;·&nbsp; 81.6% accuracy
+</footer>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
